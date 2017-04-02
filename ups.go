@@ -309,14 +309,14 @@ func (ups *upsHandler) logPanic(ctx context.Context, err interface{}) {
 }
 
 func (ups *upsHandler) logStartRequest(ctx context.Context, method string, url *url.URL) {
-	if ups.config.LogRequestBytes != nil {
+	if ups.config.LogStartRequest != nil {
 		ups.config.LogStartRequest(ctx, method, url)
 	}
 }
 
 func (ups *upsHandler) logEndRequest(ctx context.Context, method string, url *url.URL, statusCode int) {
-	if ups.config.LogRequestBytes != nil {
-		ups.config.LogStartRequest(ctx, method, url)
+	if ups.config.LogEndRequest != nil {
+		ups.config.LogEndRequest(ctx, method, url, statusCode)
 	}
 }
 
