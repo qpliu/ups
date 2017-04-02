@@ -33,6 +33,12 @@ func TestHello(t *testing.T) {
 		return &testingups.HelloResponse{Text: "Request, " + req.Name + "!"}
 	})
 
+	configNoJSON := DefaultConfig
+	configNoJSON.JSONMarshaler = nil
+	handlerNoJSON := UPSWithConfig(func(httpReq *http.Request, req *testingups.HelloRequest) *testingups.HelloResponse {
+		return &testingups.HelloResponse{Text: "No JSON, " + req.Name + "!"}
+	}, configNoJSON)
+
 	t.Run("json", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/hello", bytes.NewBufferString(`{"name":"World"}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -179,6 +185,42 @@ func TestHello(t *testing.T) {
 		handlerRequest.ServeHTTP(resp, req)
 		if resp.Code != http.StatusMethodNotAllowed {
 			t.Errorf("response code: expected: %d, got: %d", http.StatusMethodNotAllowed, resp.Code)
+		}
+	})
+
+	t.Run("protobuf,no json", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/hello", bytes.NewBuffer([]byte{
+			0x0a, // Field 1, wire type 2 (string)
+			5, 'W', 'o', 'r', 'l', 'd',
+		}))
+		req.Header.Set("Content-Type", "application/octet-stream")
+		resp := httptest.NewRecorder()
+		handlerNoJSON.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Errorf("response code: expected: %d, got: %d", http.StatusOK, resp.Code)
+		}
+		respContentType := resp.HeaderMap.Get("Content-Type")
+		if respContentType != "application/octet-stream" {
+			t.Errorf("response Content-Type: expected: application/octet-stream, got: %s", respContentType)
+		}
+		respBody := resp.Body.Bytes()
+		respBodyExpected := []byte{
+			0x0a, // Field 1, wire type 2 (string)
+			15, 'N', 'o', ' ', 'J', 'S', 'O', 'N', ',',
+			' ', 'W', 'o', 'r', 'l', 'd', '!',
+		}
+		if bytes.Compare(respBody, respBodyExpected) != 0 {
+			t.Errorf("response body, expected: %x, got: %x", respBodyExpected, respBody)
+		}
+	})
+
+	t.Run("json,no json", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/hello", bytes.NewBufferString(`{"name":"World"}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		handlerNoJSON.ServeHTTP(resp, req)
+		if resp.Code != http.StatusUnsupportedMediaType {
+			t.Errorf("response code: expected: %d, got: %d", http.StatusUnsupportedMediaType, resp.Code)
 		}
 	})
 }
