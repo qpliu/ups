@@ -89,8 +89,6 @@ type Config struct {
 	LogRequestJSON     func(context.Context, string)
 	LogResponseJSON    func(context.Context, string)
 
-	Authenticate func(context.Context, *http.Request) bool
-
 	ErrorResponse func(ctx context.Context, statusCode int) string
 }
 
@@ -193,11 +191,6 @@ func (ups *upsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ups.logStartRequest(ctx, r.Method, r.URL)
 		if r.Method != http.MethodPost {
 			statusCode = http.StatusMethodNotAllowed
-			return
-		}
-
-		if !ups.authenticate(ctx, r) {
-			statusCode = http.StatusUnauthorized
 			return
 		}
 
@@ -360,14 +353,6 @@ func (ups *upsHandler) logRequestJSON(ctx context.Context, req string) {
 func (ups *upsHandler) logResponseJSON(ctx context.Context, resp string) {
 	if ups.config.LogResponseJSON != nil {
 		ups.config.LogResponseJSON(ctx, resp)
-	}
-}
-
-func (ups *upsHandler) authenticate(ctx context.Context, r *http.Request) bool {
-	if ups.config.Authenticate != nil {
-		return ups.config.Authenticate(ctx, r)
-	} else {
-		return true
 	}
 }
 
