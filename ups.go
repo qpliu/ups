@@ -11,47 +11,44 @@ import (
 	"reflect"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 )
 
 var (
-	ContextIDKey = contextIDKey{}
-
 	DefaultConfig = Config{
 		JSONMarshaler: &jsonpb.Marshaler{OrigName: true},
 
 		LogError: func(ctx context.Context, tag string, err error) {
-			log.Printf("[%v] ERROR: %s: %s", ctx.Value(ContextIDKey), tag, err.Error())
+			log.Printf("ERROR: %s: %s", tag, err.Error())
 		},
 		LogPanic: func(ctx context.Context, err interface{}) {
-			log.Printf("[%v] PANIC: %v: %s", ctx.Value(ContextIDKey), err, debug.Stack())
+			log.Printf("PANIC: %v: %s", err, debug.Stack())
 		},
 		LogStartRequest: func(ctx context.Context, method string, url *url.URL) {
-			log.Printf("[%v] %s %s", ctx.Value(ContextIDKey), method, url)
+			log.Printf("%s %s", method, url)
 		},
 		LogEndRequest: func(ctx context.Context, method string, url *url.URL, statusCode int) {
-			log.Printf("[%v] STATUS: %d %s", ctx.Value(ContextIDKey), statusCode, url)
+			log.Printf("STATUS: %d %s", statusCode, url)
 		},
 		LogRequestMessage: func(ctx context.Context, req proto.Message) {
-			log.Printf("[%v] REQ proto: %s", ctx.Value(ContextIDKey), req.String())
+			log.Printf("REQ proto: %s", req.String())
 		},
 		LogResponseMessage: func(ctx context.Context, resp proto.Message) {
-			log.Printf("[%v] RESP proto: %s", ctx.Value(ContextIDKey), resp.String())
+			log.Printf("RESP proto: %s", resp.String())
 		},
 		LogRequestBytes: func(ctx context.Context, req []byte) {
-			log.Printf("[%v] REQ bytes: %x", ctx.Value(ContextIDKey), req)
+			log.Printf("REQ bytes: %x", req)
 		},
 		LogResponseBytes: func(ctx context.Context, resp []byte) {
-			log.Printf("[%v] RESP bytes: %x", ctx.Value(ContextIDKey), resp)
+			log.Printf("RESP bytes: %x", resp)
 		},
 		LogRequestJSON: func(ctx context.Context, req string) {
-			log.Printf("[%v] REQ JSON: %s", ctx.Value(ContextIDKey), req)
+			log.Printf("REQ JSON: %s", req)
 		},
 		LogResponseJSON: func(ctx context.Context, resp string) {
-			log.Printf("[%v] RESP JSON: %s", ctx.Value(ContextIDKey), resp)
+			log.Printf("RESP JSON: %s", resp)
 		},
 	}
 )
@@ -60,8 +57,6 @@ var (
 	messageType = reflect.TypeOf((*proto.Message)(nil)).Elem()
 	contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 	requestType = reflect.TypeOf((*http.Request)(nil))
-
-	contextID uint64
 )
 
 type handlerType int
@@ -71,9 +66,6 @@ const (
 	contextHandlerType
 	requestHandlerType
 )
-
-type contextIDKey struct {
-}
 
 type Config struct {
 	JSONMarshaler *jsonpb.Marshaler
@@ -174,9 +166,7 @@ type upsHandler struct {
 }
 
 func (ups *upsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctxID := atomic.AddUint64(&contextID, 1)
-	ctx := context.WithValue(r.Context(), ContextIDKey, ctxID)
-	r = r.WithContext(ctx)
+	ctx := r.Context()
 
 	statusCode := http.StatusOK
 	var resp []byte
