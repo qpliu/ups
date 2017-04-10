@@ -65,6 +65,9 @@ const (
 	messageHandlerType handlerType = iota
 	contextHandlerType
 	requestHandlerType
+	paramHandlerType
+	contextParamHandlerType
+	requestParamHandlerType
 )
 
 type Config struct {
@@ -100,7 +103,7 @@ type Config struct {
 //
 // UPS will panic if the argument is not a valid func.
 func UPS(handler interface{}) http.Handler {
-	return UPSWithConfig(handler, DefaultConfig)
+	return UPSWithParameterAndConfig(handler, nil, DefaultConfig)
 }
 
 // UPSWithConfig takes a func and creates an http.Handler using the
@@ -120,7 +123,55 @@ func UPS(handler interface{}) http.Handler {
 //
 // UPSWithConfig will panic if the argument is not a valid func.
 func UPSWithConfig(handler interface{}, config Config) http.Handler {
-	ups := &upsHandler{config: config, handler: reflect.ValueOf(handler)}
+	return UPSWithParameterAndConfig(handler, nil, config)
+}
+
+// UPSWithParameter takes a func and creates an http.Handler using the
+// DefaultConfig.
+//
+// The func must take take two or three arguments and return a single value.
+//
+// The func must return a proto.Message, which will be marshalled into
+// the response.
+//
+// If the func takes two arguments,  The first argument will be the parameter
+// passed to UPSWithParameter.  The second argument must be a proto.Message,
+// which will be unmarshalled from the request body.
+//
+// If the func takes three arguments, the first argument must either be a
+// context.Context or a *http.Request, the secon argument will be the
+// parameter passed to UPSWithParameter, and the third argument must be a
+// proto.Message.
+//
+// UPSWithParameter will panic if the argument is not a valid func.
+func UPSWithParameter(handler interface{}, parameter interface{}) http.Handler {
+	return UPSWithParameterAndConfig(handler, parameter, DefaultConfig)
+}
+
+// UPSWithParameterAndConfig takes a func and creates an http.Handler using
+// the provided Config.
+//
+// The func must take take two or three arguments and return a single value.
+//
+// The func must return a proto.Message, which will be marshalled into
+// the response.
+//
+// If the func takes two arguments,  The first argument will be the parameter
+// passed to UPSWithParameterAndConfig.  The second argument must be a
+// proto.Message, which will be unmarshalled from the request body.
+//
+// If the func takes three arguments, the first argument must either be a
+// context.Context or a *http.Request, the secon argument will be the
+// parameter passed to UPSWithParameter, and the third argument must be a
+// proto.Message.
+//
+// UPSWithParameterAndConfig will panic if the argument is not a valid func.
+func UPSWithParameterAndConfig(handler interface{}, parameter interface{}, config Config) http.Handler {
+	ups := &upsHandler{
+		config:    config,
+		parameter: reflect.ValueOf(parameter),
+		handler:   reflect.ValueOf(handler),
+	}
 
 	ty := reflect.TypeOf(handler)
 
@@ -129,6 +180,7 @@ func UPSWithConfig(handler interface{}, config Config) http.Handler {
 	}
 
 	var reqType reflect.Type
+	var paramType reflect.Type
 	switch ty.NumIn() {
 	case 1:
 		ups.handlerType = messageHandlerType
@@ -141,6 +193,19 @@ func UPSWithConfig(handler interface{}, config Config) http.Handler {
 		case requestType:
 			ups.handlerType = requestHandlerType
 		default:
+			ups.handlerType = paramHandlerType
+			paramType = ty.In(0)
+		}
+	case 3:
+		reqType = ty.In(2)
+		switch ty.In(0) {
+		case contextType:
+			ups.handlerType = contextParamHandlerType
+			paramType = ty.In(1)
+		case requestType:
+			ups.handlerType = requestParamHandlerType
+			paramType = ty.In(1)
+		default:
 			panic("ups: invalid handler parameter types")
 		}
 	default:
@@ -149,6 +214,10 @@ func UPSWithConfig(handler interface{}, config Config) http.Handler {
 
 	if !reqType.Implements(messageType) {
 		panic("ups: invalid handler parameter type")
+	}
+
+	if paramType != nil && !reflect.TypeOf(parameter).AssignableTo(paramType) {
+		panic("ups: param does not match param parameter type")
 	}
 
 	ups.requestObjectPool.New = func() interface{} {
@@ -162,6 +231,7 @@ type upsHandler struct {
 	config            Config
 	handlerType       handlerType
 	handler           reflect.Value
+	parameter         reflect.Value
 	requestObjectPool sync.Pool
 }
 
@@ -243,6 +313,12 @@ func (ups *upsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			args = []reflect.Value{reflect.ValueOf(ctx), arg}
 		case requestHandlerType:
 			args = []reflect.Value{reflect.ValueOf(r), arg}
+		case paramHandlerType:
+			args = []reflect.Value{ups.parameter, arg}
+		case contextParamHandlerType:
+			args = []reflect.Value{reflect.ValueOf(ctx), ups.parameter, arg}
+		case requestParamHandlerType:
+			args = []reflect.Value{reflect.ValueOf(r), ups.parameter, arg}
 		}
 
 		result := ups.handler.Call(args)[0].Interface().(proto.Message)

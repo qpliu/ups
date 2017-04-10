@@ -33,6 +33,18 @@ func TestHello(t *testing.T) {
 		return &testingups.HelloResponse{Text: "Request, " + req.Name + "!"}
 	})
 
+	handlerParam := UPSWithParameter(func(parameter int, req *testingups.HelloRequest) *testingups.HelloResponse {
+		return &testingups.HelloResponse{Text: "Parameter, " + req.Name + "!"}
+	}, 1)
+
+	handlerContextParam := UPSWithParameter(func(ctx context.Context, parameter int, req *testingups.HelloRequest) *testingups.HelloResponse {
+		return &testingups.HelloResponse{Text: "ContextParameter, " + req.Name + "!"}
+	}, 1)
+
+	handlerRequestParam := UPSWithParameter(func(httpReq *http.Request, parameter int, req *testingups.HelloRequest) *testingups.HelloResponse {
+		return &testingups.HelloResponse{Text: "RequestParameter, " + req.Name + "!"}
+	}, 1)
+
 	configNoJSON := DefaultConfig
 	configNoJSON.JSONMarshaler = nil
 	handlerNoJSON := UPSWithConfig(func(httpReq *http.Request, req *testingups.HelloRequest) *testingups.HelloResponse {
@@ -221,6 +233,86 @@ func TestHello(t *testing.T) {
 		handlerNoJSON.ServeHTTP(resp, req)
 		if resp.Code != http.StatusUnsupportedMediaType {
 			t.Errorf("response code: expected: %d, got: %d", http.StatusUnsupportedMediaType, resp.Code)
+		}
+	})
+
+	t.Run("protobuf-param", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/hello", bytes.NewBuffer([]byte{
+			0x0a, // Field 1, wire type 2 (string)
+			5, 'W', 'o', 'r', 'l', 'd',
+		}))
+		req.Header.Set("Content-Type", "application/octet-stream")
+		resp := httptest.NewRecorder()
+		handlerParam.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Errorf("response code: expected: %d, got: %d", http.StatusOK, resp.Code)
+		}
+		respContentType := resp.HeaderMap.Get("Content-Type")
+		if respContentType != "application/octet-stream" {
+			t.Errorf("response Content-Type: expected: application/octet-stream, got: %s", respContentType)
+		}
+		respBody := resp.Body.Bytes()
+		respBodyExpected := []byte{
+			0x0a, // Field 1, wire type 2 (string)
+			17, 'P', 'a', 'r', 'a', 'm', 'e', 't', 'e', 'r', ',',
+			' ', 'W', 'o', 'r', 'l', 'd', '!',
+		}
+		if bytes.Compare(respBody, respBodyExpected) != 0 {
+			t.Errorf("response body, expected: %x, got: %x", respBodyExpected, respBody)
+		}
+	})
+
+	t.Run("protobuf-context-param", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/hello", bytes.NewBuffer([]byte{
+			0x0a, // Field 1, wire type 2 (string)
+			5, 'W', 'o', 'r', 'l', 'd',
+		}))
+		req.Header.Set("Content-Type", "application/octet-stream")
+		resp := httptest.NewRecorder()
+		handlerContextParam.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Errorf("response code: expected: %d, got: %d", http.StatusOK, resp.Code)
+		}
+		respContentType := resp.HeaderMap.Get("Content-Type")
+		if respContentType != "application/octet-stream" {
+			t.Errorf("response Content-Type: expected: application/octet-stream, got: %s", respContentType)
+		}
+		respBody := resp.Body.Bytes()
+		respBodyExpected := []byte{
+			0x0a, // Field 1, wire type 2 (string)
+			24, 'C', 'o', 'n', 't', 'e', 'x', 't',
+			'P', 'a', 'r', 'a', 'm', 'e', 't', 'e', 'r', ',',
+			' ', 'W', 'o', 'r', 'l', 'd', '!',
+		}
+		if bytes.Compare(respBody, respBodyExpected) != 0 {
+			t.Errorf("response body, expected: %x, got: %x", respBodyExpected, respBody)
+		}
+	})
+
+	t.Run("protobuf-request-param", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/hello", bytes.NewBuffer([]byte{
+			0x0a, // Field 1, wire type 2 (string)
+			5, 'W', 'o', 'r', 'l', 'd',
+		}))
+		req.Header.Set("Content-Type", "application/octet-stream")
+		resp := httptest.NewRecorder()
+		handlerRequestParam.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Errorf("response code: expected: %d, got: %d", http.StatusOK, resp.Code)
+		}
+		respContentType := resp.HeaderMap.Get("Content-Type")
+		if respContentType != "application/octet-stream" {
+			t.Errorf("response Content-Type: expected: application/octet-stream, got: %s", respContentType)
+		}
+		respBody := resp.Body.Bytes()
+		respBodyExpected := []byte{
+			0x0a, // Field 1, wire type 2 (string)
+			24, 'R', 'e', 'q', 'u', 'e', 's', 't',
+			'P', 'a', 'r', 'a', 'm', 'e', 't', 'e', 'r', ',',
+			' ', 'W', 'o', 'r', 'l', 'd', '!',
+		}
+		if bytes.Compare(respBody, respBodyExpected) != 0 {
+			t.Errorf("response body, expected: %x, got: %x", respBodyExpected, respBody)
 		}
 	})
 }
