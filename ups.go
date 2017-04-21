@@ -54,6 +54,7 @@ var (
 )
 
 var (
+	errorType   = reflect.TypeOf((*error)(nil)).Elem()
 	messageType = reflect.TypeOf((*proto.Message)(nil)).Elem()
 	contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 	requestType = reflect.TypeOf((*http.Request)(nil))
@@ -87,12 +88,22 @@ type Config struct {
 	ErrorResponse func(ctx context.Context, statusCode int) string
 }
 
+// StatusCoder can be implemented by the error returned by a handler,
+// in which case it provides the HTTP status code of the response.
+type StatusCoder interface {
+	StatusCode() int
+}
+
 // UPS takes a func and creates an http.Handler using the DefaultConfig.
 //
-// The func must take take one or two arguments and return a single value.
+// The func must take take one or two arguments and return one or two
+// values.
 //
 // The func must return a proto.Message, which will be marshalled into
-// the response.
+// the response, or return a (proto.Message, error).  If the error is not
+// nil, the response will be 500 HTTP status unless the error implements
+// StatusCoder, in which case it will provide the HTTP status of the
+// response.
 //
 // If the func takes one argument, it must be a proto.Message, which will
 // be unmarshalled from the request body.
@@ -109,10 +120,14 @@ func UPS(handler interface{}) http.Handler {
 // UPSWithConfig takes a func and creates an http.Handler using the
 // provided Config.
 //
-// The func must take take one or two arguments and return a single value.
+// The func must take take one or two arguments and return one or two
+// values.
 //
 // The func must return a proto.Message, which will be marshalled into
-// the response.
+// the response, or return a (proto.Message, error).  If the error is not
+// nil, the response will be 500 HTTP status unless the error implements
+// StatusCoder, in which case it will provide the HTTP status of the
+// response.
 //
 // If the func takes one argument, it must be a proto.Message, which will
 // be unmarshalled from the request body.
@@ -129,10 +144,14 @@ func UPSWithConfig(handler interface{}, config Config) http.Handler {
 // UPSWithParameter takes a func and creates an http.Handler using the
 // DefaultConfig.
 //
-// The func must take take two or three arguments and return a single value.
+// The func must take take two or three arguments and return one or two
+// values.
 //
 // The func must return a proto.Message, which will be marshalled into
-// the response.
+// the response, or return a (proto.Message, error).  If the error is not
+// nil, the response will be 500 HTTP status unless the error implements
+// StatusCoder, in which case it will provide the HTTP status of the
+// response.
 //
 // If the func takes two arguments,  The first argument will be the parameter
 // passed to UPSWithParameter.  The second argument must be a proto.Message,
@@ -151,10 +170,14 @@ func UPSWithParameter(handler interface{}, parameter interface{}) http.Handler {
 // UPSWithParameterAndConfig takes a func and creates an http.Handler using
 // the provided Config.
 //
-// The func must take take two or three arguments and return a single value.
+// The func must take take two or three arguments and return one or two
+// values.
 //
 // The func must return a proto.Message, which will be marshalled into
-// the response.
+// the response, or return a (proto.Message, error).  If the error is not
+// nil, the response will be 500 HTTP status unless the error implements
+// StatusCoder, in which case it will provide the HTTP status of the
+// response.
 //
 // If the func takes two arguments,  The first argument will be the parameter
 // passed to UPSWithParameterAndConfig.  The second argument must be a
@@ -175,7 +198,17 @@ func UPSWithParameterAndConfig(handler interface{}, parameter interface{}, confi
 
 	ty := reflect.TypeOf(handler)
 
-	if ty.NumOut() != 1 || !ty.Out(0).Implements(messageType) {
+	switch ty.NumOut() {
+	case 2:
+		if !ty.Out(1).Implements(errorType) {
+			panic("ups: invalid handler error return type")
+		}
+		fallthrough
+	case 1:
+		if !ty.Out(0).Implements(messageType) {
+			panic("ups: invalid handler message return type")
+		}
+	default:
 		panic("ups: invalid handler return type")
 	}
 
@@ -321,6 +354,15 @@ func (ups *upsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			args = []reflect.Value{reflect.ValueOf(r), ups.parameter, arg}
 		}
 
+		results := ups.handler.Call(args)
+		if len(results) > 1 && !results[1].IsNil() {
+			if err, ok := results[1].Interface().(StatusCoder); ok {
+				statusCode = err.StatusCode()
+			} else {
+				statusCode = http.StatusInternalServerError
+			}
+			return
+		}
 		result := ups.handler.Call(args)[0].Interface().(proto.Message)
 		ups.logResponseMessage(ctx, result)
 

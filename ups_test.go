@@ -3,13 +3,25 @@ package ups
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/qpliu/ups/testingups"
 )
+
+type testError int
+
+func (err testError) Error() string {
+	return strconv.Itoa(int(err))
+}
+
+func (err testError) StatusCode() int {
+	return int(err)
+}
 
 func TestHello(t *testing.T) {
 	var logs bytes.Buffer
@@ -34,7 +46,7 @@ func TestHello(t *testing.T) {
 	})
 
 	handlerParam := UPSWithParameter(func(parameter int, req *testingups.HelloRequest) *testingups.HelloResponse {
-		return &testingups.HelloResponse{Text: "Parameter, " + req.Name + "!"}
+		return &testingups.HelloResponse{Text: "Parameter " + strconv.Itoa(parameter) + ", " + req.Name + "!"}
 	}, 1)
 
 	handlerContextParam := UPSWithParameter(func(ctx context.Context, parameter int, req *testingups.HelloRequest) *testingups.HelloResponse {
@@ -44,6 +56,17 @@ func TestHello(t *testing.T) {
 	handlerRequestParam := UPSWithParameter(func(httpReq *http.Request, parameter int, req *testingups.HelloRequest) *testingups.HelloResponse {
 		return &testingups.HelloResponse{Text: "RequestParameter, " + req.Name + "!"}
 	}, 1)
+
+	handlerError := UPS(func(req *testingups.HelloRequest) (*testingups.HelloResponse, error) {
+		switch req.Name {
+		case "Error":
+			return nil, errors.New("error")
+		case "Teapot":
+			return nil, testError(http.StatusTeapot)
+		default:
+			return &testingups.HelloResponse{Text: "Error, " + req.Name + "!"}, nil
+		}
+	})
 
 	configNoJSON := DefaultConfig
 	configNoJSON.JSONMarshaler = nil
@@ -254,8 +277,8 @@ func TestHello(t *testing.T) {
 		respBody := resp.Body.Bytes()
 		respBodyExpected := []byte{
 			0x0a, // Field 1, wire type 2 (string)
-			17, 'P', 'a', 'r', 'a', 'm', 'e', 't', 'e', 'r', ',',
-			' ', 'W', 'o', 'r', 'l', 'd', '!',
+			19, 'P', 'a', 'r', 'a', 'm', 'e', 't', 'e', 'r', ' ',
+			'1', ',', ' ', 'W', 'o', 'r', 'l', 'd', '!',
 		}
 		if bytes.Compare(respBody, respBodyExpected) != 0 {
 			t.Errorf("response body, expected: %x, got: %x", respBodyExpected, respBody)
@@ -315,9 +338,40 @@ func TestHello(t *testing.T) {
 			t.Errorf("response body, expected: %x, got: %x", respBodyExpected, respBody)
 		}
 	})
+
+	t.Run("error", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/hello", bytes.NewBufferString(`{"name":"Success"}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		handlerError.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Errorf("response code: expected: %d, got: %d", http.StatusOK, resp.Code)
+		}
+		respBody := resp.Body.String()
+		respBodyExpected := `{"text":"Error, Success!"}`
+		if respBody != respBodyExpected {
+			t.Errorf("response body, expected: %s, got: %s", respBodyExpected, respBody)
+		}
+
+		req = httptest.NewRequest(http.MethodPost, "/hello", bytes.NewBufferString(`{"name":"Teapot"}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp = httptest.NewRecorder()
+		handlerError.ServeHTTP(resp, req)
+		if resp.Code != http.StatusTeapot {
+			t.Errorf("response code: expected: %d, got: %d", http.StatusTeapot, resp.Code)
+		}
+
+		req = httptest.NewRequest(http.MethodPost, "/hello", bytes.NewBufferString(`{"name":"Error"}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp = httptest.NewRecorder()
+		handlerError.ServeHTTP(resp, req)
+		if resp.Code != http.StatusInternalServerError {
+			t.Errorf("response code: expected: %d, got: %d", http.StatusInternalServerError, resp.Code)
+		}
+	})
 }
 
-func ExampleHello() {
+func ExampleUPS() {
 	http.Handle("/hello", UPS(func(req *testingups.HelloRequest) *testingups.HelloResponse {
 		return &testingups.HelloResponse{Text: "Hello, " + req.Name + "!"}
 	}))
