@@ -363,7 +363,7 @@ func (ups *upsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		result := ups.handler.Call(args)[0].Interface().(proto.Message)
+		result := results[0].Interface().(proto.Message)
 		ups.logResponseMessage(ctx, result)
 
 		if json {
